@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Print the detected CUDA capability or a derived nvcc flag."""
+
 from __future__ import annotations
 
 import argparse
@@ -20,6 +22,7 @@ def main() -> int:
         return 0
 
     if not capability:
+        # Keep shell scripts deterministic on CPU-only hosts.
         fallback = args.fallback.replace("sm_", "").replace(".", "")
         capability = f"{fallback[0]}.{fallback[1:]}" if len(fallback) >= 2 else "8.9"
 

@@ -1,3 +1,5 @@
+"""Elementwise addition teaching example with PyTorch extension JIT build."""
+
 import os
 import time
 from functools import partial
@@ -51,19 +53,21 @@ def run_benchmark(
     iters: int = 1000,
     show_all: bool = False,
 ):
-    # torch.dot vs custom dot_prod kernel
+    # Reuse the output buffer so the timing focuses on kernel work instead of
+    # repeated tensor allocations.
     if out is not None:
         out.fill_(0)
-    # warmup
+    # Warm up the kernel and JIT-loaded bindings before timing.
     if out is not None:
         for i in range(warmup):
             perf_func(a, b, out)
     else:
         for i in range(warmup):
             _ = perf_func(a, b)
+    # Synchronize around the timed region to avoid measuring queued launches.
     torch.cuda.synchronize()
     start = time.time()
-    # iters
+    # Time the requested number of steady-state iterations.
     if out is not None:
         for i in range(iters):
             perf_func(a, b, out)

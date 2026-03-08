@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Run a repo example after applying modern CUDA build defaults."""
+
 from __future__ import annotations
 
 import argparse
@@ -31,6 +33,8 @@ def main() -> int:
     )
 
     script_dir = script_path.parent
+    # Match "python path/to/script.py" semantics after switching into the
+    # example directory so relative CUDA source paths still resolve.
     os.chdir(script_dir)
     sys.path.insert(0, str(root))
     sys.path.insert(0, str(script_dir))

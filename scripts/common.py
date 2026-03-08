@@ -1,3 +1,5 @@
+"""Shared helpers for bootstrap, diagnostics, and example launchers."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -10,14 +12,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def repo_root() -> Path:
+    """Return the repository root resolved from this file."""
     return REPO_ROOT
 
 
 def package_available(module_name: str) -> bool:
+    """Check whether a Python package can be imported."""
     return importlib.util.find_spec(module_name) is not None
 
 
 def read_total_memory_gib() -> float | None:
+    """Read total host memory from /proc/meminfo when available."""
     meminfo = Path("/proc/meminfo")
     if not meminfo.exists():
         return None
@@ -32,6 +37,7 @@ def read_total_memory_gib() -> float | None:
 def recommend_max_jobs(
     total_memory_gib: float | None = None, cpu_count: int | None = None
 ) -> int:
+    """Choose a conservative build parallelism level for CUDA extensions."""
     if cpu_count is None:
         cpu_count = os.cpu_count() or 1
     if total_memory_gib is None:
@@ -44,6 +50,7 @@ def recommend_max_jobs(
 
 
 def detect_torch_device() -> dict[str, object]:
+    """Collect the torch/CUDA facts used by the repo entrypoints."""
     info: dict[str, object] = {
         "torch_available": False,
         "torch_version": None,
@@ -71,6 +78,7 @@ def detect_torch_device() -> dict[str, object]:
 
 
 def capability_to_sm(capability: str | None) -> str | None:
+    """Convert a torch capability string like '12.0' to '120'."""
     if not capability:
         return None
     parts = capability.split(".")
@@ -80,6 +88,7 @@ def capability_to_sm(capability: str | None) -> str | None:
 
 
 def gencode_flags_for_capability(capability: str | None) -> str | None:
+    """Build one explicit nvcc gencode flag for a capability string."""
     sm = capability_to_sm(capability)
     if sm is None:
         return None
@@ -87,6 +96,7 @@ def gencode_flags_for_capability(capability: str | None) -> str | None:
 
 
 def configure_build_environment(verbose: bool = False) -> dict[str, object]:
+    """Populate arch and build-parallelism defaults for direct JIT builds."""
     info = detect_torch_device()
     if info["capability"] and "TORCH_CUDA_ARCH_LIST" not in os.environ:
         os.environ["TORCH_CUDA_ARCH_LIST"] = str(info["capability"])
@@ -108,6 +118,7 @@ def configure_build_environment(verbose: bool = False) -> dict[str, object]:
 
 
 def run_command(cmd: list[str], cwd: Path | None = None) -> tuple[int, str]:
+    """Run a command and capture combined stdout/stderr for diagnostics."""
     proc = subprocess.run(
         cmd,
         cwd=cwd or REPO_ROOT,
@@ -120,8 +131,10 @@ def run_command(cmd: list[str], cwd: Path | None = None) -> tuple[int, str]:
 
 
 def cutlass_header() -> Path:
+    """Return the canonical CUTLASS header path used as a readiness check."""
     return REPO_ROOT / "third-party" / "cutlass" / "include" / "cute" / "tensor.hpp"
 
 
 def cutlass_ready() -> bool:
+    """Report whether the required CUTLASS header is present."""
     return cutlass_header().exists()

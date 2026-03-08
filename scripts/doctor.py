@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Inspect the local GPU/CUDA/PyTorch environment for LeetCUDA."""
+
 from __future__ import annotations
 
 import platform
@@ -16,11 +18,13 @@ from common import (
 
 
 def status_line(ok: bool, label: str, detail: str) -> None:
+    """Render one aligned diagnostic line."""
     prefix = "[OK]" if ok else "[WARN]"
     print(f"{prefix:<6} {label:<18} {detail}")
 
 
 def main() -> int:
+    """Print the environment status and the recommended first commands."""
     root = repo_root()
     print(f"Repo root: {root}")
     print(f"Python: {sys.executable}")
@@ -64,6 +68,7 @@ def main() -> int:
         ["git", "submodule", "status", "--recursive"], cwd=root
     )
     if submodule_code == 0 and submodule_out:
+        # A leading '-' means the submodule is registered but not initialized.
         initialized = all(not line.startswith("-") for line in submodule_out.splitlines())
         status_line(initialized, "Submodules", submodule_out.replace("\n", " | "))
 

@@ -1,3 +1,5 @@
+"""Build configuration for the optional toy_hgemm wheel."""
+
 import os
 import subprocess
 from pathlib import Path
@@ -7,11 +9,12 @@ from setuptools import find_packages, setup
 from tools.utils import get_build_cuda_cflags, get_build_sources
 from torch.utils.cpp_extension import CUDA_HOME, BuildExtension, CUDAExtension
 
-# package name managed by pip, which can be remove by `pip uninstall toy-hgemm`
+# Package name managed by pip, so `pip uninstall toy-hgemm` removes it cleanly.
 PACKAGE_NAME = "toy-hgemm"
 
 
 def parse_version(version: str) -> tuple[int, ...]:
+    """Extract numeric version components from nvcc or torch version strings."""
     numbers: list[int] = []
     for part in version.replace("+", ".").split("."):
         digits = "".join(ch for ch in part if ch.isdigit())
@@ -21,15 +24,18 @@ def parse_version(version: str) -> tuple[int, ...]:
 
 
 def version_gte(found: str, expected: str) -> bool:
+    """Compare loose numeric version tuples."""
     return parse_version(found) >= parse_version(expected)
 
 
 def add_codegen_flag(flags: list[str], arch_code: str) -> None:
+    """Append one nvcc gencode pair for a concrete SM architecture."""
     flags.append("-gencode")
     flags.append(f"arch=compute_{arch_code},code=sm_{arch_code}")
 
 
 def get_cuda_bare_metal_version(cuda_dir: str) -> tuple[str, str]:
+    """Read the installed nvcc version from the CUDA toolkit."""
     raw_output = subprocess.check_output(
         [cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True
     )
@@ -40,6 +46,7 @@ def get_cuda_bare_metal_version(cuda_dir: str) -> tuple[str, str]:
 
 
 def get_local_arch_code() -> str | None:
+    """Return the local GPU arch like '120' when CUDA is available."""
     if not torch.cuda.is_available():
         return None
     major, minor = torch.cuda.get_device_capability(0)
@@ -47,6 +54,7 @@ def get_local_arch_code() -> str | None:
 
 
 def get_default_arch_codes() -> list[str]:
+    """Return the conservative multi-arch wheel defaults used for distribution."""
     arch_codes: list[str] = ["80", "89"]
     if CUDA_HOME is not None:
         _, bare_metal_version = get_cuda_bare_metal_version(CUDA_HOME)
@@ -56,6 +64,7 @@ def get_default_arch_codes() -> list[str]:
 
 
 def parse_arch_codes(raw_value: str) -> list[str]:
+    """Parse a comma- or semicolon-separated arch list like '89,90,120'."""
     arch_codes: list[str] = []
     for part in raw_value.replace(";", ",").split(","):
         digits = "".join(ch for ch in part if ch.isdigit())
@@ -65,16 +74,21 @@ def parse_arch_codes(raw_value: str) -> list[str]:
 
 
 def get_codegen_flags() -> list[str]:
+    """Select native or explicit wheel architectures for the current build."""
     requested_arches = os.getenv("LEETCUDA_WHEEL_ARCHES", "").strip().lower()
     local_arch_code = get_local_arch_code()
 
     if requested_arches == "default":
+        # Distribution builds keep the historical default set and add the local
+        # GPU when one is present.
         arch_codes = get_default_arch_codes()
         if local_arch_code is not None:
             arch_codes.append(local_arch_code)
     elif requested_arches:
         arch_codes = parse_arch_codes(requested_arches)
     elif local_arch_code is not None:
+        # Native-only wheels are much cheaper to build on memory-constrained
+        # development machines.
         arch_codes = [local_arch_code]
     else:
         arch_codes = get_default_arch_codes()
@@ -99,11 +113,11 @@ ext_modules = []
 generator_flag: list[str] = []
 cc_flag = get_codegen_flags()
 
-# ninja build does not work unless include_dirs are abs path
+# Ninja expects absolute include paths for reliable extension builds.
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
-# cuda module
-# may need export LD_LIBRARY_PATH=PATH-TO/torch/lib:$LD_LIBRARY_PATH
+# The wheel exposes only the Python extension. Benchmark binaries stay out of
+# the package build to keep installation predictable.
 ext_modules.append(
     CUDAExtension(
         # package name for import

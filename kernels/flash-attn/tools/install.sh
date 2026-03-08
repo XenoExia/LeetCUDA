@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$ROOT_DIR"
 
+# Ensure CUTLASS and the repo submodules are available before the optional
+# official flash-attn build starts.
 git submodule update --init --recursive --force
 export MAX_JOBS="${MAX_JOBS:-1}"
 

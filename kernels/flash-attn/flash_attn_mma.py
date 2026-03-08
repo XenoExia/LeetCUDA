@@ -1,3 +1,5 @@
+"""FlashAttention teaching driver with optional minimal-build support."""
+
 import argparse
 import math
 import os
@@ -14,6 +16,8 @@ from torch.nn import functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.utils.cpp_extension import load
 
+# The official flash-attn package is optional. The custom teaching kernels can
+# still run and benchmark against SDPA without it.
 try:
     from flash_attn import flash_attn_func
 except ImportError as exc:
@@ -97,6 +101,8 @@ def get_extension_name() -> str:
     minimal_build_version = "v2"
     if not args.minimal_build:
         return "flash_attn_lib"
+    # Use a distinct cache key so minimal builds never reuse a stale full-build
+    # lockfile or extension artifact.
     tag_hints = parse_tag_hints()
     if not tag_hints:
         return f"flash_attn_lib_minimal_{minimal_build_version}"
@@ -120,6 +126,7 @@ def get_minimal_source_map() -> list[tuple[str, str]]:
 
 
 def get_requested_minimal_features() -> list[str]:
+    # Tag hints let smoke tests compile only the kernel families they exercise.
     feature_names = [feature for feature, _ in get_minimal_source_map()]
     tag_hints = parse_tag_hints()
     if not tag_hints:
@@ -134,6 +141,7 @@ def get_requested_minimal_features() -> list[str]:
 
 def get_build_sources():
     if args.minimal_build:
+        # Minimal mode keeps the build small enough for teaching and smoke tests.
         requested_features = set(get_requested_minimal_features())
         deduped_sources = [
             source
@@ -224,6 +232,7 @@ def get_total_memory_gib():
 
 
 def configure_build_environment():
+    # Match the repo wrapper behavior when this script is launched directly.
     if torch.cuda.is_available() and "TORCH_CUDA_ARCH_LIST" not in os.environ:
         major, minor = get_device_capability()
         os.environ["TORCH_CUDA_ARCH_LIST"] = f"{major}.{minor}"
@@ -313,6 +322,7 @@ def get_build_cflags():
         "-DBUILD_FLASH_ATTN_MMA_MINIMAL" if args.minimal_build else ""
     )
     if args.minimal_build:
+        # Mirror the selected feature subset into the pybind registration layer.
         for feature in get_requested_minimal_features():
             feature_macro = feature.upper().replace("-", "_")
             extra_cflags.append(
@@ -345,7 +355,7 @@ if FLASH_ATTN_IMPORT_ERROR is not None:
         "will be skipped"
     )
 
-# Load the CUDA kernel as a python module
+# Build only the extension variant requested by the current run mode.
 ensure_cutlass_submodule()
 lib = load(
     name=get_extension_name(),
@@ -356,6 +366,8 @@ lib = load(
 )
 
 if not args.build_others:
+    # Preserve the existing benchmark call sites even when the optional
+    # "others" kernels were intentionally left out of the build.
     fake_fa_func = lambda q, k, v, o, s: o  # fake FA func
     setattr(lib, "flash_attn_mma_stages_split_q_shared_qkv_Os2g", fake_fa_func)
     setattr(
@@ -366,6 +378,8 @@ if not args.build_others:
     )
 
 if args.minimal_build:
+    # Minimal builds do not register every symbol. Populate absent bindings with
+    # None so the benchmark loop can skip them cleanly.
     all_symbols = [
         "flash_attn_mma_stages_split_kv",
         "flash_attn_mma_stages_split_q",

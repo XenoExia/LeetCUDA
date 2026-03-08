@@ -1,3 +1,5 @@
+"""Runtime helpers for the HGEMM teaching scripts and wheel build."""
+
 import os
 from pathlib import Path
 
@@ -6,6 +8,7 @@ from torch.utils.cpp_extension import load
 
 
 def get_device_name():
+    """Return the active CUDA device name with the repo's WSL naming tweak."""
     device_name = torch.cuda.get_device_name(torch.cuda.current_device())
     # since we will run GPU on WSL2, so add WSL2 tag.
     if "Laptop" in device_name:
@@ -14,10 +17,12 @@ def get_device_name():
 
 
 def get_device_capability():
+    """Return the active CUDA capability tuple."""
     return torch.cuda.get_device_capability(torch.cuda.current_device())
 
 
 def get_build_sources():
+    """Return the source set used by both JIT and package builds."""
     build_sources = []
     build_sources.append("naive/hgemm.cu")
     build_sources.append("naive/hgemm_async.cu")
@@ -35,6 +40,7 @@ def get_build_sources():
 
 
 def get_project_dir():
+    """Return the repository root from the nested helper directory."""
     return os.path.dirname(
         os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +49,7 @@ def get_project_dir():
 
 
 def get_total_memory_gib():
+    """Read total host memory from /proc/meminfo when available."""
     meminfo = Path("/proc/meminfo")
     if not meminfo.exists():
         return None
@@ -55,6 +62,7 @@ def get_total_memory_gib():
 
 
 def configure_build_environment():
+    """Populate arch and MAX_JOBS defaults for local CUDA extension builds."""
     if torch.cuda.is_available() and "TORCH_CUDA_ARCH_LIST" not in os.environ:
         major, minor = get_device_capability()
         os.environ["TORCH_CUDA_ARCH_LIST"] = f"{major}.{minor}"
@@ -71,6 +79,7 @@ def configure_build_environment():
 
 
 def ensure_cutlass_submodule():
+    """Fail early when the CUTLASS submodule has not been initialized."""
     header = (
         Path(get_project_dir())
         / "third-party"
@@ -88,23 +97,8 @@ def ensure_cutlass_submodule():
 
 
 def get_build_cuda_cflags(build_pkg: bool = False):
-    # -Xptxas -v:
-    # registers, smem, cmem, stack, gmem usage
-    # registers: 寄存器，访问速度最快。Ada Lovelace架构每个SM的寄存器文件大小
-    # 为256KB，这相当于65536个32位寄存器，65536/256=256。一个SM可以同时执行多
-    # 个block，对一个Kernel，同时存在于一个SM中的Block和Warp数量取决于SM中可用
-    # 且所需的寄存器和共享内存数量。每个Thread需要的寄存器越多，那么SM中的Warp就
-    # 越少。即减少Thread所需寄存器数量，即可增加SM中的Warp数。每个Block需要的共
-    # 享内存越多，那么SM中可以被同时处理的Block就会变少。即减少每个Block所需的共
-    # 享内存，即可同时处理更多Block。SM内的资源没办法处理一个完整Block，Kernel
-    # 将无法启动。
-    # cmem: 常量内存，被缓存，访问速度快。
-    # stack frame: 由于寄存器的数量有限，当需要使用的变量数量超过可用寄存器数量时，
-    # 编译器会将某些变量从寄存器“溢出”到栈上，这个过程称为spill。访问栈上的数据比
-    # 访问寄存器慢得多。
-    # spill stores: 指的是在执行过程中，数据因为寄存器不足而被存储到了栈上。
-    # spill loads: 则是指将之前溢出到栈上的数据重新加载回寄存器。
-    # diag 177: variable was declared but never referenced
+    # Keep ptxas verbosity enabled for local builds so benchmark runs expose
+    # register usage, shared-memory usage, constant-memory usage, and spills.
     extra_cuda_cflags = []
     extra_cuda_cflags.append("-O3")
     extra_cuda_cflags.append("-std=c++17")
@@ -121,7 +115,8 @@ def get_build_cuda_cflags(build_pkg: bool = False):
     else:
         extra_cuda_cflags.append("--ptxas-options=-v")
         extra_cuda_cflags.append("--ptxas-options=-O3")
-    # extra cuda flags for cute hgemm
+    # Package builds export only the pybind extension, not the standalone
+    # benchmark binaries used by the teaching scripts.
     project_dir = get_project_dir()
     extra_cuda_cflags.append("-DNO_MMA_HGEMM_BIN")
     extra_cuda_cflags.append("-DNO_WMMA_HGEMM_BIN")
@@ -146,6 +141,7 @@ def get_build_cuda_cflags(build_pkg: bool = False):
 
 
 def pretty_print_line(m: str = "", sep: str = "-", width: int = 150):
+    """Render the wide separators used by the benchmark scripts."""
     res_len = width - len(m)
     left_len = int(res_len / 2)
     right_len = res_len - left_len
@@ -154,9 +150,9 @@ def pretty_print_line(m: str = "", sep: str = "-", width: int = 150):
 
 
 def build_from_sources(verbose: bool = False):
+    """JIT-build the HGEMM extension directly from source."""
     ensure_cutlass_submodule()
     torch_arch_list_env, max_jobs_env = configure_build_environment()
-    # Load the CUDA kernel as a python module
     pretty_print_line(
         f"Loading hgemm lib on device: {get_device_name()}, "
         f"capability: {get_device_capability()}, "
@@ -173,8 +169,8 @@ def build_from_sources(verbose: bool = False):
 
 
 def try_load_hgemm_library(force_build: bool = False, verbose: bool = False):
+    """Reuse an installed wheel when possible, otherwise fall back to JIT."""
     if not force_build:
-        # check if can import toy_hgemm
         try:
             import toy_hgemm as hgemm
 
@@ -198,7 +194,8 @@ def try_load_hgemm_library(force_build: bool = False, verbose: bool = False):
 
 @torch.no_grad
 def as_col_major(x: torch.Tensor):
-    # convert a row major tensor -> col major with contiguous storage
+    # Reinterpret the tensor through a transpose/reshape pair so the final
+    # contiguous storage follows column-major order.
     x_trans = x.t()
     x_col_major = x_trans.reshape(x.shape)
     return x_col_major.contiguous()  # must be a contiguous tensor

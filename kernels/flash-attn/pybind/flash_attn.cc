@@ -2,6 +2,7 @@
 #include <torch/types.h>
 
 #define STRINGFY(str) #str
+// Bind each compiled entrypoint under the same Python-visible name.
 #define TORCH_BINDING_COMMON_EXTENSION(func)                                   \
   m.def(STRINGFY(func), &func, STRINGFY(func));
 
@@ -167,6 +168,7 @@ void flash_attn_mma_stages_split_q_shared_kv_acc_f32_rr(torch::Tensor Q,
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 #ifdef BUILD_FLASH_ATTN_MMA_MINIMAL
+  // Minimal builds only register the kernel families requested by the caller.
 #ifdef BUILD_FLASH_ATTN_MMA_MINIMAL_SPLIT_KV
   TORCH_BINDING_COMMON_EXTENSION(flash_attn_mma_stages_split_kv)
 #endif
