@@ -115,6 +115,7 @@ flash_attn_mma_stages_split_q_tiling_qkv_kernel(half* Q, half* K, half* V, half*
 <div id="install"></div>
 
 ```bash
+bash scripts/bootstrap_env.sh
 pip install flash-attn --no-build-isolation # need offical flash-attention for comparison
 ```
 
@@ -128,11 +129,17 @@ Currently, for small-scale attention (B<=4, H <=48, SeqLen <= 8192), the flash-a
 
 ```bash
 cd kernels/flash-attn
-# Volta, Ampere, Ada, Hopper, ...
+# Legacy: you can still set TORCH_CUDA_ARCH_LIST manually if needed.
 python3 -m pip install flash-attn --no-build-isolation
-export TORCH_CUDA_ARCH_LIST=Ada # for Ada only
-export TORCH_CUDA_ARCH_LIST=Ampere # for Ampere only
+# Recommended: run from the repository root with the wrapper.
+python3 scripts/run_example.py kernels/flash-attn/flash_attn_mma.py --D 64
+# Local directory usage:
 python3 flash_attn_mma.py --D 64 # test all default settings for D=64
+```
+On modern GPUs, prefer the repo wrapper so the architecture and build parallelism
+are auto-configured:
+```bash
+python3 scripts/run_example.py kernels/flash-attn/flash_attn_mma.py --B 1 --H 8 --N 1024 --D 64 --iters 1 --warmup 0 --sdpa
 ```
 
 - Example: B=1, H=8, N=8192, `D=64` (NVIDIA RTX 3080 Laptop), Faster than FA2~🎉🎉

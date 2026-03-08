@@ -44,9 +44,10 @@ reg_y.y = HALF_GELU_OPS(__half2float(reg_x.y));
 此外仿照torch实现了在float下tanh和none两种近似下的GELU函数，可以在gelu.cu的宏中进行修改实现不同的版本的编译。
 
 ```bash
-# 只测试Ada架构 不指定默认编译所有架构 耗时较长: Volta, Ampere, Ada, Hopper, ...
-export TORCH_CUDA_ARCH_LIST=Ada
-python3 gelu.py
+# 推荐: 在仓库根目录执行, 自动检测当前GPU架构
+python3 scripts/run_example.py kernels/gelu/gelu.py
+# 兼容旧用法: 在当前目录直接运行
+# python3 gelu.py
 ```
 
 输出（不做类型转换导致half误差）:

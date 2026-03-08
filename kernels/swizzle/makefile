@@ -1,6 +1,7 @@
 INCLUDE_DIRS=-I ../../third-party/cutlass/include -I ../../third-party/cutlass/tools/util/include
-ARCHS=-gencode arch=compute_80,code=sm_80 -gencode arch=compute_89,code=sm_89
-ARCHS_89=-gencode arch=compute_89,code=sm_89
+CURRENT_ARCHS:=$(shell python3 ../../scripts/detect_cuda_arch.py --gencode --fallback 89)
+ARCHS?=$(CURRENT_ARCHS)
+ARCHS_89?=-gencode arch=compute_89,code=sm_89
 DEFAULT_FLAGS=-O2 $(ARCHS) -std=c++17 $(INCLUDE_DIRS) --expt-relaxed-constexpr -lcublas
 DEFAULT_FLAGS_89=-O2 $(ARCHS_89) -std=c++17 $(INCLUDE_DIRS) --expt-relaxed-constexpr -lcublas
 default:

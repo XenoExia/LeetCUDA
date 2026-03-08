@@ -16,9 +16,10 @@
 ## 测试
 
 ```bash
-# 只测试Ada架构 不指定默认编译所有架构 耗时较长: Volta, Ampere, Ada, Hopper, ...
-export TORCH_CUDA_ARCH_LIST=Ada
-python3 sigmoid.py
+# 推荐: 在仓库根目录执行, 自动检测当前GPU架构
+python3 scripts/run_example.py kernels/sigmoid/sigmoid.py
+# 兼容旧用法: 在当前目录直接运行
+# python3 sigmoid.py
 ```
 
 输出:

@@ -103,9 +103,12 @@ void hgemm_mma_m16n8k16_mma2x4_warp4x4x2_stages_dsmem_tn_swizzle_x4(torch::Tenso
 
 The HGEMM implemented in this repo can be install as a python library, namely, `toy-hgemm` library (optional).
 ```bash
+bash scripts/bootstrap_env.sh
 cd kernels/hgemm
 git submodule update --init --recursive --force # Fetch `CUTLASS` submodule， needed
-python3 setup.py bdist_wheel && cd dist && python3 -m pip install *.whl # pip uninstall toy-hgemm -y
+python3 setup.py bdist_wheel && cd dist && python3 -m pip install *.whl # defaults to the current GPU arch
+# Optional: build a multi-arch wheel for sharing/distribution.
+LEETCUDA_WHEEL_ARCHES=default python3 setup.py bdist_wheel
 ```
 
 ## 📖 Python Testing
@@ -120,9 +123,11 @@ git submodule update --init --recursive --force
 You can test many custom HGEMM kernel via Python script and figure out the difference in their performance.
 
 ```bash
-# You can test Ada or Ampere only, also, Volta, Ampere, Ada, Hopper, ...
-export TORCH_CUDA_ARCH_LIST=Ada # for Ada only
-export TORCH_CUDA_ARCH_LIST=Ampere # for Ampere only
+# Legacy: you can still set TORCH_CUDA_ARCH_LIST manually if needed.
+# Recommended: run from the repository root with the wrapper.
+python3 scripts/run_example.py kernels/hgemm/hgemm.py --wmma
+python3 scripts/run_example.py kernels/hgemm/hgemm.py --mma
+# Local directory usage:
 python3 hgemm.py --wmma # test defalut wmma kernels for all MNK
 python3 hgemm.py --mma  # test defalut mma kernels for all MNK
 python3 hgemm.py --M 16384 --N 16384 --K 8192 --i 10 --wmma # test default wmma kernels for specific MNK
@@ -131,6 +136,11 @@ python3 hgemm.py --wmma-all # test all wmma kernels for all MNK
 python3 hgemm.py --mma-all # test all mma kernels for all MNK
 python3 hgemm.py --cuda-all --wmma-all --mma-all # test all kernels for all MNK
 python3 hgemm.py --cute-tn --no-default # test cute hgemm kernels with smem swizzle for all MNK
+```
+On modern GPUs, prefer the repo wrapper so the architecture and build parallelism
+are auto-configured:
+```bash
+python3 scripts/run_example.py kernels/hgemm/hgemm.py --M 256 --N 256 --K 256 --mma --no-default --iters 1 --warmup 0
 ```
 If you want to draw a TFLOPS curve, you need to install `matplotlib` first and set the --plot-flops (or --plot) option.
 ```bash

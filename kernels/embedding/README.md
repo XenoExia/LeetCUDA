@@ -16,9 +16,10 @@
 ## 测试
 
 ```bash
-# 只测试Ada架构 不指定默认编译所有架构 耗时较长: Volta, Ampere, Ada, Hopper, ...
-export TORCH_CUDA_ARCH_LIST=Ada
-python3 embedding.py
+# 推荐: 在仓库根目录执行, 自动检测当前GPU架构
+python3 scripts/run_example.py kernels/embedding/embedding.py
+# 兼容旧用法: 在当前目录直接运行
+# python3 embedding.py
 ```
 一个elemwise的操作，但是有个值得探究的问题，在f16下pack的性能优于没有pack的性能但是在f32下相反
 输出:

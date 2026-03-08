@@ -15,6 +15,69 @@
 
 📚 **LeetCUDA**: It includes **Tensor/CUDA Cores, TF32/F16/BF16/F8**, [📖200+ CUDA Kernels🔥](#cuda-kernel) with PyTorch, [📖100+ LLM/CUDA🔥](#my-blogs-part-1) blogs, [📖HGEMM⚡️](./kernels/hgemm) which can achieve `98%~100%` TFLOPS of **cuBLAS**, and [📖flash-attn⚡️](./kernels/flash-attn) using Tensor Cores with pure MMA PTX. ♥️ Please consider to leave a ⭐️ Star to support me, my bro ~ ♥️
 
+## 🚀 Quick Start For Modern GPUs
+
+LeetCUDA now includes a small environment layer for modern NVIDIA GPUs,
+including RTX 5090 / `sm_120` style setups:
+
+```bash
+make bootstrap
+make doctor
+make smoke
+make elementwise
+python3 scripts/run_example.py kernels/hgemm/hgemm.py --M 256 --N 256 --K 256 --mma --no-default --iters 1 --warmup 0
+```
+
+If you want to skip the heavy official `flash-attn` package build during bootstrap:
+
+```bash
+SKIP_FLASH_ATTN_INSTALL=1 bash scripts/bootstrap_env.sh
+```
+
+What these entry points do:
+
+- `scripts/bootstrap_env.sh`: initialize submodules and install baseline dependencies.
+- `scripts/doctor.py`: inspect GPU / CUDA / PyTorch / submodule status.
+- `scripts/run_example.py`: auto-detect `TORCH_CUDA_ARCH_LIST` and apply a safer `MAX_JOBS` default for large CUDA builds.
+- `make smoke`: run the recommended environment and kernel smoke tests end-to-end.
+- `make flash-attn-smoke`: compile a smaller FlashAttention teaching subset instead of every variant.
+- `make hgemm-wheel`: build a local HGEMM wheel for the current GPU architecture.
+
+## 📚 Tutorial Mode
+
+This repo can now also be used as a step-by-step AI infra learning course.
+Start here:
+
+### English tutorial
+
+- [Learning Path](./docs/README.md)
+- [00 Getting Started](./docs/00-getting-started.md)
+- [01 CPU and GPU Architecture](./docs/01-cpu-gpu-architecture.md)
+- [02 CUDA Programming Model](./docs/02-cuda-programming-model.md)
+- [03 Kernel Roadmap](./docs/03-kernel-roadmap.md)
+- [04 GEMM and Attention](./docs/04-gemm-and-attention.md)
+- [05 Debugging and Profiling](./docs/05-debugging-and-profiling.md)
+- [06 Exercises](./docs/06-exercises.md)
+- [07 Glossary and Cheatsheet](./docs/07-glossary-and-cheatsheet.md)
+- [08 Beyond Kernels](./docs/08-beyond-kernels.md)
+- [09 Repo Atlas](./docs/09-repo-atlas.md)
+- [10 Reading List](./docs/10-reading-list.md)
+
+### 中文教程
+
+- [学习路径](./docs/zh/README.md)
+- [00 快速开始](./docs/zh/00-getting-started.md)
+- [01 CPU 与 GPU 硬件结构](./docs/zh/01-cpu-gpu-architecture.md)
+- [02 CUDA 编程模型](./docs/zh/02-cuda-programming-model.md)
+- [03 Kernel 学习路线图](./docs/zh/03-kernel-roadmap.md)
+- [04 GEMM 与 Attention](./docs/zh/04-gemm-and-attention.md)
+- [05 调试与剖析](./docs/zh/05-debugging-and-profiling.md)
+- [06 练习](./docs/zh/06-exercises.md)
+- [07 术语与速查](./docs/zh/07-glossary-and-cheatsheet.md)
+- [08 进阶专题](./docs/zh/08-beyond-kernels.md)
+- [09 仓库全图](./docs/zh/09-repo-atlas.md)
+- [10 阅读清单](./docs/zh/10-reading-list.md)
+
 <div align="center">
   <p align="center">
     <a href="#contribute">🔥🔥 PR Welcome: Add Your Kernel to LeetCUDA! Let's make it Awesome together! 🎉🎉</a> <br>

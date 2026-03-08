@@ -166,6 +166,29 @@ void flash_attn_mma_stages_split_q_shared_kv_acc_f32_rr(torch::Tensor Q,
 #endif
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+#ifdef BUILD_FLASH_ATTN_MMA_MINIMAL
+#ifdef BUILD_FLASH_ATTN_MMA_MINIMAL_SPLIT_KV
+  TORCH_BINDING_COMMON_EXTENSION(flash_attn_mma_stages_split_kv)
+#endif
+#ifdef BUILD_FLASH_ATTN_MMA_MINIMAL_SPLIT_Q
+  TORCH_BINDING_COMMON_EXTENSION(flash_attn_mma_stages_split_q)
+#endif
+#ifdef BUILD_FLASH_ATTN_MMA_MINIMAL_SHARE_KV
+  TORCH_BINDING_COMMON_EXTENSION(flash_attn_mma_stages_split_q_shared_kv)
+#endif
+#ifdef BUILD_FLASH_ATTN_MMA_MINIMAL_SHARE_QKV
+  TORCH_BINDING_COMMON_EXTENSION(flash_attn_mma_stages_split_q_shared_qkv)
+#endif
+#ifdef BUILD_FLASH_ATTN_MMA_MINIMAL_TILING_QK
+  TORCH_BINDING_COMMON_EXTENSION(flash_attn_mma_stages_split_q_tiling_qk)
+#endif
+#ifdef BUILD_FLASH_ATTN_MMA_MINIMAL_TILING_QKV
+  TORCH_BINDING_COMMON_EXTENSION(flash_attn_mma_stages_split_q_tiling_qkv)
+#endif
+#ifdef BUILD_FLASH_ATTN_MMA_MINIMAL_CUTE
+  TORCH_BINDING_COMMON_EXTENSION(flash_attn_cute)
+#endif
+#else
   // Basic
   TORCH_BINDING_COMMON_EXTENSION(flash_attn_mma_stages_split_kv)
   TORCH_BINDING_COMMON_EXTENSION(flash_attn_mma_stages_split_q)
@@ -220,5 +243,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       flash_attn_mma_stages_split_q_shared_kv_acc_f32_rr)
   TORCH_BINDING_COMMON_EXTENSION(
       flash_attn_mma_stages_split_q_shared_qkv_acc_f32_rr)
+#endif
 #endif
 }

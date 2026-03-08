@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import torch
 from torch.utils.cpp_extension import load
@@ -39,6 +40,51 @@ def get_project_dir():
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         )
     )
+
+
+def get_total_memory_gib():
+    meminfo = Path("/proc/meminfo")
+    if not meminfo.exists():
+        return None
+    for line in meminfo.read_text().splitlines():
+        if line.startswith("MemTotal:"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                return int(parts[1]) / (1024 * 1024)
+    return None
+
+
+def configure_build_environment():
+    if torch.cuda.is_available() and "TORCH_CUDA_ARCH_LIST" not in os.environ:
+        major, minor = get_device_capability()
+        os.environ["TORCH_CUDA_ARCH_LIST"] = f"{major}.{minor}"
+    if "MAX_JOBS" not in os.environ:
+        total_memory_gib = get_total_memory_gib()
+        if total_memory_gib is None or total_memory_gib < 32:
+            max_jobs = 1
+        elif total_memory_gib < 64:
+            max_jobs = 2
+        else:
+            max_jobs = min(os.cpu_count() or 1, 4)
+        os.environ["MAX_JOBS"] = str(max_jobs)
+    return os.environ.get("TORCH_CUDA_ARCH_LIST"), os.environ.get("MAX_JOBS")
+
+
+def ensure_cutlass_submodule():
+    header = (
+        Path(get_project_dir())
+        / "third-party"
+        / "cutlass"
+        / "include"
+        / "cute"
+        / "tensor.hpp"
+    )
+    if not header.exists():
+        raise FileNotFoundError(
+            "CUTLASS submodule is missing. Run "
+            "`git submodule update --init --recursive --force` "
+            "from the repository root first."
+        )
 
 
 def get_build_cuda_cflags(build_pkg: bool = False):
@@ -108,12 +154,14 @@ def pretty_print_line(m: str = "", sep: str = "-", width: int = 150):
 
 
 def build_from_sources(verbose: bool = False):
-    torch_arch_list_env = os.environ.get("TORCH_CUDA_ARCH_LIST", None)
+    ensure_cutlass_submodule()
+    torch_arch_list_env, max_jobs_env = configure_build_environment()
     # Load the CUDA kernel as a python module
     pretty_print_line(
         f"Loading hgemm lib on device: {get_device_name()}, "
         f"capability: {get_device_capability()}, "
-        f"Arch ENV: {torch_arch_list_env}"
+        f"Arch ENV: {torch_arch_list_env}, "
+        f"MAX_JOBS: {max_jobs_env}"
     )
     return load(
         name="hgemm_lib",

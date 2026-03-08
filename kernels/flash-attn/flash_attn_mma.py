@@ -4,15 +4,23 @@ import os
 import random
 import time
 from functools import partial
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import torch
-from flash_attn import flash_attn_func
 from torch import Tensor
 from torch.nn import functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.utils.cpp_extension import load
+
+try:
+    from flash_attn import flash_attn_func
+except ImportError as exc:
+    flash_attn_func = None
+    FLASH_ATTN_IMPORT_ERROR = exc
+else:
+    FLASH_ATTN_IMPORT_ERROR = None
 
 torch.set_grad_enabled(False)
 torch.set_printoptions(
@@ -50,6 +58,7 @@ def get_args():
     parser.add_argument("--iters", "--i", type=int, default=5)
     parser.add_argument("--range-k", "--gk", action="store_true")
     parser.add_argument("--build-others", "--others", action="store_true")
+    parser.add_argument("--minimal-build", "--minimal", action="store_true")
     parser.add_argument(
         "--tag-hints", "--tags", "--hints", type=str, default=None
     )
@@ -78,7 +87,61 @@ def get_device_capability():
     return torch.cuda.get_device_capability(torch.cuda.current_device())
 
 
+def parse_tag_hints() -> list[str]:
+    if not args.tag_hints:
+        return []
+    return [hint.strip() for hint in args.tag_hints.split(",") if hint.strip()]
+
+
+def get_extension_name() -> str:
+    minimal_build_version = "v2"
+    if not args.minimal_build:
+        return "flash_attn_lib"
+    tag_hints = parse_tag_hints()
+    if not tag_hints:
+        return f"flash_attn_lib_minimal_{minimal_build_version}"
+    safe_suffix = "_".join(
+        "".join(ch if ch.isalnum() else "_" for ch in hint)
+        for hint in sorted(tag_hints)
+    )
+    return f"flash_attn_lib_minimal_{minimal_build_version}_{safe_suffix}"
+
+
+def get_minimal_source_map() -> list[tuple[str, str]]:
+    return [
+        ("split-kv", "./mma/basic/flash_attn_mma_split_kv.cu"),
+        ("split-q", "./mma/basic/flash_attn_mma_split_q.cu"),
+        ("share-kv", "./mma/basic/flash_attn_mma_share_kv.cu"),
+        ("share-qkv", "./mma/basic/flash_attn_mma_share_qkv.cu"),
+        ("tiling-qk", "./mma/basic/flash_attn_mma_tiling_qk.cu"),
+        ("tiling-qkv", "./mma/basic/flash_attn_mma_tiling_qkv.cu"),
+        ("cute", "./cutlass/flash_attn_cute.cu"),
+    ]
+
+
+def get_requested_minimal_features() -> list[str]:
+    feature_names = [feature for feature, _ in get_minimal_source_map()]
+    tag_hints = parse_tag_hints()
+    if not tag_hints:
+        return feature_names
+    requested_features = []
+    for hint in tag_hints:
+        for feature in feature_names:
+            if feature in hint or hint in feature:
+                requested_features.append(feature)
+    return list(dict.fromkeys(requested_features)) or feature_names
+
+
 def get_build_sources():
+    if args.minimal_build:
+        requested_features = set(get_requested_minimal_features())
+        deduped_sources = [
+            source
+            for feature, source in get_minimal_source_map()
+            if feature in requested_features
+        ]
+        deduped_sources.append("./pybind/flash_attn.cc")
+        return deduped_sources
     build_sources = []
     # Basic
     build_sources.append("./mma/basic/flash_attn_mma_split_kv.cu")
@@ -148,6 +211,51 @@ def get_project_dir():
 project_dir = get_project_dir()
 
 
+def get_total_memory_gib():
+    meminfo = Path("/proc/meminfo")
+    if not meminfo.exists():
+        return None
+    for line in meminfo.read_text().splitlines():
+        if line.startswith("MemTotal:"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                return int(parts[1]) / (1024 * 1024)
+    return None
+
+
+def configure_build_environment():
+    if torch.cuda.is_available() and "TORCH_CUDA_ARCH_LIST" not in os.environ:
+        major, minor = get_device_capability()
+        os.environ["TORCH_CUDA_ARCH_LIST"] = f"{major}.{minor}"
+    if "MAX_JOBS" not in os.environ:
+        total_memory_gib = get_total_memory_gib()
+        if total_memory_gib is None or total_memory_gib < 32:
+            max_jobs = 1
+        elif total_memory_gib < 64:
+            max_jobs = 2
+        else:
+            max_jobs = min(os.cpu_count() or 1, 4)
+        os.environ["MAX_JOBS"] = str(max_jobs)
+    return os.environ.get("TORCH_CUDA_ARCH_LIST"), os.environ.get("MAX_JOBS")
+
+
+def ensure_cutlass_submodule():
+    header = (
+        Path(project_dir)
+        / "third-party"
+        / "cutlass"
+        / "include"
+        / "cute"
+        / "tensor.hpp"
+    )
+    if not header.exists():
+        raise FileNotFoundError(
+            "CUTLASS submodule is missing. Run "
+            "`git submodule update --init --recursive --force` "
+            "from the repository root first."
+        )
+
+
 def get_build_cuda_cflags(build_pkg: bool = False):
     device_name = get_device_name()
     project_dir = get_project_dir()
@@ -201,6 +309,15 @@ def get_build_cflags():
     extra_cflags.append(
         "-DBUILD_FLASH_ATTN_MMA_OTHERS" if args.build_others else ""
     )
+    extra_cflags.append(
+        "-DBUILD_FLASH_ATTN_MMA_MINIMAL" if args.minimal_build else ""
+    )
+    if args.minimal_build:
+        for feature in get_requested_minimal_features():
+            feature_macro = feature.upper().replace("-", "_")
+            extra_cflags.append(
+                f"-DBUILD_FLASH_ATTN_MMA_MINIMAL_{feature_macro}"
+            )
     return extra_cflags
 
 
@@ -214,13 +331,24 @@ def pretty_print_line(m: str = "", sep: str = "-", width: int = 150):
 
 if args.D and args.D > 256:
     args.run_torch_sdpa = True
+torch_arch_list_env, max_jobs_env = configure_build_environment()
 pretty_print_line()
 print(args)
 pretty_print_line()
+pretty_print_line(
+    f"Device: {get_device_name()}, capability: {get_device_capability()}, "
+    f"Arch ENV: {torch_arch_list_env}, MAX_JOBS: {max_jobs_env}"
+)
+if FLASH_ATTN_IMPORT_ERROR is not None:
+    pretty_print_line(
+        "flash-attn python package not installed; official FA comparison "
+        "will be skipped"
+    )
 
 # Load the CUDA kernel as a python module
+ensure_cutlass_submodule()
 lib = load(
-    name="flash_attn_lib",
+    name=get_extension_name(),
     sources=get_build_sources(),
     extra_cuda_cflags=get_build_cuda_cflags(),
     extra_cflags=get_build_cflags(),
@@ -236,6 +364,42 @@ if not args.build_others:
     setattr(
         lib, "flash_attn_mma_stages_split_q_shared_qkv_acc_f32_rr", fake_fa_func
     )
+
+if args.minimal_build:
+    all_symbols = [
+        "flash_attn_mma_stages_split_kv",
+        "flash_attn_mma_stages_split_q",
+        "flash_attn_mma_stages_split_q_shared_kv",
+        "flash_attn_mma_stages_split_q_shared_qkv",
+        "flash_attn_mma_stages_split_q_tiling_qk",
+        "flash_attn_mma_stages_split_q_tiling_qkv",
+        "flash_attn_mma_stages_split_q_shared_kv_acc_f32",
+        "flash_attn_mma_stages_split_q_shared_qkv_acc_f32",
+        "flash_attn_mma_stages_split_q_tiling_qk_acc_f32",
+        "flash_attn_mma_stages_split_q_tiling_qkv_acc_f32",
+        "flash_attn_mma_stages_split_q_shared_kv_swizzle_q",
+        "flash_attn_mma_stages_split_q_shared_kv_swizzle_qk",
+        "flash_attn_mma_stages_split_q_shared_kv_swizzle_qkv",
+        "flash_attn_mma_stages_split_q_shared_qkv_swizzle_q",
+        "flash_attn_mma_stages_split_q_shared_qkv_swizzle_qk",
+        "flash_attn_mma_stages_split_q_shared_qkv_swizzle_qkv",
+        "flash_attn_mma_stages_split_q_tiling_qk_swizzle_q",
+        "flash_attn_mma_stages_split_q_tiling_qk_swizzle_qk",
+        "flash_attn_mma_stages_split_q_tiling_qk_swizzle_qkv",
+        "flash_attn_mma_stages_split_q_tiling_qkv_swizzle_q",
+        "flash_attn_mma_stages_split_q_tiling_qkv_swizzle_qk",
+        "flash_attn_mma_stages_split_q_tiling_qkv_swizzle_qkv",
+        "flash_attn_mma_stages_split_q_tiling_qkv_acc_f32_swizzle_q",
+        "flash_attn_mma_stages_split_q_tiling_qkv_acc_f32_swizzle_qk",
+        "flash_attn_mma_stages_split_q_tiling_qkv_acc_f32_swizzle_qkv",
+        "flash_attn_mma_stages_split_q_shared_qkv_Os2g",
+        "flash_attn_mma_stages_split_q_shared_kv_acc_f32_rr",
+        "flash_attn_mma_stages_split_q_shared_qkv_acc_f32_rr",
+        "flash_attn_cute",
+    ]
+    for symbol in all_symbols:
+        if not hasattr(lib, symbol):
+            setattr(lib, symbol, None)
 
 
 def get_mha_tflops(
@@ -301,9 +465,17 @@ def run_benchmark(
     global MAX_TFLOPS
     global MAX_HEADDIM_CFG
 
-    tag_hints: str = args.tag_hints  # e.g "share-qkv,tiling-kv,swizzle"
+    if perf_func is None:
+        reason = (
+            "flash-attn package not installed"
+            if "flash" in tag
+            else "kernel not built for current minimal selection"
+        )
+        print(f"{tag:>50}: skipped, {reason}")
+        return None, None
+
+    tag_hints = parse_tag_hints()  # e.g "share-qkv,tiling-kv,swizzle"
     if tag_hints:
-        tag_hints: list = tag_hints.strip().split(",")
         tag_hints.append("flash")
         tag_hints.append("sdpa")
         tag_hints.append("unfused")
