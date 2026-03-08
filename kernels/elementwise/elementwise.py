@@ -1,3 +1,4 @@
+import os
 import time
 from functools import partial
 from typing import Optional
@@ -5,6 +6,21 @@ from typing import Optional
 import torch
 from torch.utils.cpp_extension import load
 
+
+def configure_cuda_build_defaults() -> None:
+    # Keep the teaching example self-contained when it is launched directly.
+    if not torch.cuda.is_available():
+        return
+
+    props = torch.cuda.get_device_properties(0)
+    dev_arch = f"{props.major}.{props.minor}"
+    print(f"Detected GPU: {props.name}, compute capability: {dev_arch}")
+    if "TORCH_CUDA_ARCH_LIST" not in os.environ:
+        print(f"Setting TORCH_CUDA_ARCH_LIST to {dev_arch}")
+        os.environ["TORCH_CUDA_ARCH_LIST"] = dev_arch
+
+
+configure_cuda_build_defaults()
 torch.set_grad_enabled(False)
 
 # Load the CUDA kernel as a python module
